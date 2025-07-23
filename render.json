@@ -1,0 +1,15 @@
+{
+  "services": [
+    {
+      "type": "web",
+      "name": "deepfake-video-api",
+      "env": "node",
+      "plan": "free",
+      "buildCommand": "npm install",
+      "startCommand": "node index.js",
+      "envVars": {
+        "PORT": "3000"
+      }
+    }
+  ]
+}
