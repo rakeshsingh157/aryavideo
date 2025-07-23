@@ -1,50 +1,45 @@
-// For a Vercel serverless function, this typically goes into `api/deepfake-video-check.js`
-// or `api/index.js` if it's the only endpoint.
-// Make sure this file is inside a folder named `api` in your project root.
-
+// api/deepfake-video-check.js
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const cors = require('cors'); // Import cors for cross-origin requests
+const cors = require('cors'); // Required for cross-origin requests from your Flutter app
 
 const app = express();
 
-// Increase payload limit for incoming requests to your Vercel function
-// This should match or exceed the maximum base64 string size you expect from Flutter
-// 10MB should be sufficient for many videos, but consider Vercel's hard limit of 4.5MB
-// for the entire request payload. If the base64 string from Flutter is consistently
-// larger than ~3MB (which becomes ~4MB Base64), you might hit Vercel's 4.5MB limit.
+// Middleware to parse JSON bodies with a limit of 10MB.
+// This must be placed before any route definitions that handle JSON.
 app.use(bodyParser.json({ limit: '10mb' }));
-app.use(cors()); // Enable CORS for all routes, essential for web/cross-origin Flutter
+// Enable CORS for all routes, essential for Flutter web or cross-origin development
+app.use(cors());
 
-// This will be your Vercel serverless function endpoint, e.g., /api/deepfake-video-check
+// IMPORTANT: Replace with your actual private token from Arya.ai
+const ARYA_AI_API_TOKEN = '9174f6c9a0636697f629b1e31485fa4a';
+const ARYA_AI_API_ENDPOINT = 'https://ping.arya.ai/api/v1/deepfake-detection/video';
+
 app.post('/deepfake-video-check', async (req, res) => {
-    // IMPORTANT: Replace with your actual private token from Arya.ai
-    const API_TOKEN = '9174f6c9a0636697f629b1e31485fa4a'; 
-    const API_ENDPOINT = 'https://ping.arya.ai/api/v1/deepfake-detection/video';
-
     try {
         const { doc_base64, req_id, doc_type, isIOS, orientation } = req.body;
 
-        // Basic input validation
+        // Input validation for required parameters
         if (!doc_base64 || !req_id || !doc_type) {
             console.error('Missing required parameters in request body:', req.body);
-            return res.status(400).json({ error: 'Missing required parameters' });
+            return res.status(400).json({
+                error: 'Missing required parameters',
+                details: 'Please provide doc_base64, req_id, and doc_type.'
+            });
         }
 
-        // Validate types for Arya.ai API if necessary (optional, but good for robustness)
-        // For example, ensuring isIOS is boolean and orientation is number
-        if (typeof isIOS !== 'boolean' && typeof isIOS !== 'undefined') {
+        // Optional: Type validation for other parameters, depends on strictness needed
+        if (typeof isIOS !== 'boolean' && typeof isIOS !== 'undefined' && isIOS !== null) {
             console.error('Invalid type for isIOS:', isIOS);
             return res.status(400).json({ error: 'Invalid type for isIOS. Must be boolean.' });
         }
-        if (typeof orientation !== 'number' && typeof orientation !== 'undefined') {
+        if (typeof orientation !== 'number' && typeof orientation !== 'undefined' && orientation !== null) {
              console.error('Invalid type for orientation:', orientation);
             return res.status(400).json({ error: 'Invalid type for orientation. Must be number.' });
         }
 
-
-        // Prepare the payload for Arya.ai API
+        // Prepare the payload to be sent to the Arya.ai API
         const payloadToArya = {
             doc_base64: doc_base64,
             req_id: req_id,
@@ -53,62 +48,72 @@ app.post('/deepfake-video-check', async (req, res) => {
             orientation: orientation,
         };
 
-        console.log('Proxying request to Arya.ai with payload (excluding base64 snippet for brevity):', {
-            req_id: payloadToArya.req_id,
-            doc_type: payloadToArya.doc_type,
-            isIOS: payloadToArya.isIOS,
-            orientation: payloadToArya.orientation,
-            base64Length: doc_base64.length // Log length instead of full string
-        });
+        console.log('--- Proxying Request to Arya.ai ---');
+        console.log('Target Endpoint:', ARYA_AI_API_ENDPOINT);
+        console.log('Payload Details (base64 length):', doc_base64.length, 'bytes');
+        console.log('Other Payload Fields:', { req_id, doc_type, isIOS, orientation });
 
-        const options = {
+        const axiosOptions = {
             method: 'POST',
-            url: API_ENDPOINT,
+            url: ARYA_AI_API_ENDPOINT,
             headers: {
-                'token': API_TOKEN, // Use 'token' header as per their doc
-                'Content-Type': 'application/json', // Use 'Content-Type' as per their doc
+                'token': ARYA_AI_API_TOKEN, // Arya.ai expects 'token' header
+                'Content-Type': 'application/json',
             },
-            data: payloadToArya, // Axios will automatically stringify this JSON object
+            data: payloadToArya, // Axios will automatically stringify this object
             // Set a generous timeout for the Arya.ai API call (e.g., 2 minutes)
-            // This needs to be less than your Vercel function's maxDuration
+            // This should be less than your Vercel function's maxDuration
             timeout: 120000, // 120 seconds = 2 minutes
         };
 
-        const response = await axios(options);
+        const response = await axios(axiosOptions);
 
-        // If Arya.ai responds successfully, send their data back to Flutter
-        console.log('Received success response from Arya.ai:', response.data);
-        res.status(200).json(response.data);
+        // If Arya.ai responds successfully (2xx status), forward their response to Flutter
+        console.log('--- Received Success Response from Arya.ai ---');
+        console.log('Status:', response.status);
+        console.log('Data:', response.data);
+        res.status(response.status).json(response.data);
 
     } catch (error) {
-        console.error('--- Error processing deepfake video check ---');
+        console.error('--- Error in deepfake-video-check proxy endpoint ---');
         if (error.response) {
-            // This means Arya.ai responded with a non-2xx status code (e.g., 400, 401, 403, 500 from Arya.ai)
-            console.error('Error response from Arya.ai:', error.response.status, error.response.data);
-            res.status(error.response.status).json(error.response.data);
+            // Error response received from Arya.ai API (e.g., 400, 401, 500 from them)
+            console.error('Error Response from Arya.ai API:', error.response.status, error.response.data);
+            res.status(error.response.status).json({
+                error: 'Error from external API',
+                statusCode: error.response.status,
+                details: error.response.data
+            });
         } else if (error.request) {
-            // The request was made but no response was received (e.g., network error, timeout from axios)
-            console.error('No response received from Arya.ai. Request details:', error.request);
+            // Request was made to Arya.ai but no response was received (e.g., network error, DNS, timeout)
+            console.error('No response received from Arya.ai API. Request details:', error.request);
             console.error('Axios error message:', error.message);
-            console.error('Axios error code:', error.code); // Look for 'ETIMEDOUT', 'ECONNABORTED', 'ENOTFOUND'
-            res.status(503).json({ error: 'Service Unavailable: Arya.ai API did not respond or timed out.', details: error.message, code: error.code });
+            console.error('Axios error code:', error.code); // Look for 'ETIMEDOUT', 'ECONNREFUSED', 'ENOTFOUND'
+            res.status(504).json({ // Using 504 for gateway timeout or no response from upstream
+                error: 'Service Unavailable: External API did not respond.',
+                details: error.message,
+                code: error.code // Provides specific network error code
+            });
         } else {
-            // Something else happened in setting up the request or during processing
-            console.error('Error setting up request or unexpected error:', error.message);
-            res.status(500).json({ error: 'Internal Server Error: An unexpected error occurred.', details: error.message });
+            // Something else went wrong (e.g., error in request setup, JavaScript error in this file)
+            console.error('An unexpected error occurred in proxy logic:', error.message);
+            res.status(500).json({
+                error: 'Internal Server Error: An unexpected error occurred in proxy.',
+                details: error.message
+            });
         }
         console.error('--- End Error Log ---');
     }
 });
 
-// Health check endpoint (optional, but useful for monitoring Vercel deployment)
+// Simple health check endpoint for monitoring Vercel deployment status
 app.get('/health', (req, res) => {
-    res.send('OK');
+    res.status(200).send('OK');
 });
 
-// Export the app for Vercel
+// Export the app for Vercel serverless function deployment
 module.exports = app;
 
-// For local testing:
+// For local development only:
 // const PORT = process.env.PORT || 3000;
 // app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
