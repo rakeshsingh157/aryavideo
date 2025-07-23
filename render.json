@@ -6,7 +6,7 @@
       "env": "node",
       "plan": "free",
       "buildCommand": "npm install",
-      "startCommand": "node index.js",
+      "startCommand": "node server.js",
       "envVars": {
         "PORT": "3000"
       }
